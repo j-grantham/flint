@@ -988,20 +988,133 @@ _gr_acb_cmp(int * res, const acb_t x, const acb_t y, const gr_ctx_t ctx)
 }
 
 int
+_gr_arb_cmpabs(int * res, const arb_t x, const arb_t y, const gr_ctx_t ctx);
+
+int
 _gr_acb_cmpabs(int * res, const acb_t x, const acb_t y, const gr_ctx_t ctx)
 {
-    acb_t t, u;
+    if (arb_is_zero(acb_imagref(x)) && arb_is_zero(acb_imagref(y)))
+    {
+        arb_srcptr a = acb_realref(x);
+        arb_srcptr c = acb_realref(y);
 
-    *t = *x;
-    *u = *y;
+        /* OK; ignores the context object */
+        return _gr_arb_cmpabs(res, a, c, ctx);
+    }
+    else
+    {
+        slong prec = ACB_CTX_PREC(ctx);
+        int status = GR_SUCCESS;
 
-    if (arf_sgn(arb_midref(acb_realref(t))) < 0)
-        ARF_NEG(arb_midref(acb_realref(t)));
+        arb_srcptr a = acb_realref(x);
+        arb_srcptr b = acb_imagref(x);
+        arb_srcptr c = acb_realref(y);
+        arb_srcptr d = acb_imagref(y);
 
-    if (arf_sgn(arb_midref(acb_realref(u))) < 0)
-        ARF_NEG(arb_midref(acb_realref(u)));
+        mag_t xlo, xhi, ylo, yhi, t;
 
-    return _gr_acb_cmp(res, t, u, ctx);
+        mag_init(xlo);
+        mag_init(xhi);
+        mag_init(ylo);
+        mag_init(yhi);
+        mag_init(t);
+
+        arb_get_mag_lower(xlo, a);
+        arb_get_mag_lower(t, b);
+        mag_mul_lower(xlo, xlo, xlo);
+        mag_mul_lower(t, t, t);
+        mag_add_lower(xlo, xlo, t);
+
+        arb_get_mag_lower(ylo, c);
+        arb_get_mag_lower(t, d);
+        mag_mul_lower(ylo, ylo, ylo);
+        mag_mul_lower(t, t, t);
+        mag_add_lower(ylo, ylo, t);
+
+        arb_get_mag(xhi, a);
+        arb_get_mag(t, b);
+        mag_mul(xhi, xhi, xhi);
+        mag_mul(t, t, t);
+        mag_add(xhi, xhi, t);
+
+        arb_get_mag(yhi, c);
+        arb_get_mag(t, d);
+        mag_mul(yhi, yhi, yhi);
+        mag_mul(t, t, t);
+        mag_add(yhi, yhi, t);
+
+        if (mag_cmp(xhi, ylo) < 0)
+        {
+            *res = -1;
+            status = GR_SUCCESS;
+        }
+        else if (mag_cmp(xlo, yhi) > 0)
+        {
+            *res = 1;
+            status = GR_SUCCESS;
+        }
+        else
+        {
+            arb_t t, u;
+
+            arb_init(t);
+            arb_init(u);
+
+            arb_mul(t, a, a, prec);
+            arb_addmul(t, b, b, prec);
+            arb_mul(u, c, c, prec);
+            arb_addmul(u, d, d, prec);
+
+            if ((arb_is_exact(t) && arb_is_exact(u)) || !arb_overlaps(t, u))
+            {
+                *res = arf_cmp(arb_midref(t), arb_midref(u));
+                status = GR_SUCCESS;
+            }
+            else
+            {
+                /* todo: worth it to do an exact computation? */
+                *res = 0;
+                status = GR_UNABLE;
+            }
+
+            arb_clear(t);
+            arb_clear(u);
+        }
+
+        mag_clear(xlo);
+        mag_clear(xhi);
+        mag_clear(ylo);
+        mag_clear(yhi);
+        mag_clear(t);
+
+        return status;
+    }
+}
+
+int
+_gr_acb_min(acb_t res, const acb_t x, const acb_t y, const gr_ctx_t ctx)
+{
+    if (arb_is_zero(acb_imagref(x)) && arb_is_zero(acb_imagref(y)))
+    {
+        arb_min(acb_realref(res), acb_realref(x), acb_realref(y), ACB_CTX_PREC(ctx));
+        arb_zero(acb_imagref(res));
+        return GR_SUCCESS;
+    }
+    else
+        return GR_UNABLE;
+}
+
+int
+_gr_acb_max(acb_t res, const acb_t x, const acb_t y, const gr_ctx_t ctx)
+{
+    if (arb_is_zero(acb_imagref(x)) && arb_is_zero(acb_imagref(y)))
+    {
+        arb_max(acb_realref(res), acb_realref(x), acb_realref(y), ACB_CTX_PREC(ctx));
+        arb_zero(acb_imagref(res));
+        return GR_SUCCESS;
+    }
+    else
+        return GR_UNABLE;
 }
 
 int
@@ -1330,13 +1443,7 @@ _gr_acb_gamma_fmpq(acb_t res, const fmpq_t x, const gr_ctx_t ctx)
     }
 }
 
-
-int
-_gr_acb_rgamma(acb_t res, const acb_t x, const gr_ctx_t ctx)
-{
-    acb_rgamma(res, x, ACB_CTX_PREC(ctx));
-    return GR_SUCCESS;
-}
+DEF_FUNC(rgamma)
 
 int
 _gr_acb_lgamma(acb_t res, const acb_t x, const gr_ctx_t ctx)
@@ -1642,12 +1749,7 @@ int _gr_acb_stieltjes(acb_t res, const fmpz_t n, const acb_t a, const gr_ctx_t c
     return acb_is_finite(res) ? GR_SUCCESS : GR_UNABLE;
 }
 
-int
-_gr_acb_dirichlet_eta(acb_t res, const acb_t x, const gr_ctx_t ctx)
-{
-    acb_dirichlet_eta(res, x, ACB_CTX_PREC(ctx));
-    return GR_SUCCESS;
-}
+DEF_FUNC(dirichlet_eta)
 
 /* todo
 int
@@ -2220,6 +2322,8 @@ gr_method_tab_input _acb_methods_input[] =
     {GR_METHOD_ARG,             (gr_funcptr) _gr_acb_arg},
     {GR_METHOD_CMP,             (gr_funcptr) _gr_acb_cmp},
     {GR_METHOD_CMPABS,          (gr_funcptr) _gr_acb_cmpabs},
+    {GR_METHOD_MIN,             (gr_funcptr) _gr_acb_min},
+    {GR_METHOD_MAX,             (gr_funcptr) _gr_acb_max},
     {GR_METHOD_PI,              (gr_funcptr) _gr_acb_pi},
     {GR_METHOD_EXP,             (gr_funcptr) _gr_acb_exp},
     {GR_METHOD_EXPM1,           (gr_funcptr) _gr_acb_expm1},
